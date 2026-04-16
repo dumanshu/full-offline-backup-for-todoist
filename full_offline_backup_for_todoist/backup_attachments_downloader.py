@@ -2,13 +2,13 @@
 """ Utility to download the attachments associated with a Todoist backup VFS
     The downloaded attachments are packed to the same VFS """
 
-import csv
 import re
 import json
 import itertools
 import os
 from typing import Set, List, Optional
 from .utils import sanitize_file_name
+from .backup_downloader import SYNC_DATA_FILENAME
 from .virtual_fs import VirtualFs
 from .tracer import Tracer
 from .url_downloader import URLDownloader
@@ -36,47 +36,47 @@ class TodoistBackupAttachmentsDownloader:
         self.__urldownloader = urldownloader
 
     @staticmethod
-    def __fetch_attachment_info_from_json(json_str: str) -> Optional[TodoistAttachmentInfo]:
-        """ Fetches the information of an attachment of a Todoist backup CSV file,
-            given the JSON content of a task with an attachment """
-        json_data = json.loads(json_str)
-
-        # Exclude those files that are created from e.g. external website links
-        if "file_name" not in json_data or "file_url" not in json_data:
+    def __attachment_from_dict(data: dict) -> Optional[TodoistAttachmentInfo]:
+        if "file_name" not in data or "file_url" not in data:
             return None
-
-        return TodoistAttachmentInfo(sanitize_file_name(json_data["file_name"]),
-                                     json_data["file_url"])
-
-    def __fetch_attachment_infos_from_csv(self, csv_string: str) -> List[TodoistAttachmentInfo]:
-        """ Fetches the information of all the attachments of a Todoist backup CSV file,
-            given a CSV file as a single string """
-        attachment_infos = []
-
-        csv_reader = csv.DictReader(csv_string.split('\n'))
-        for row in csv_reader:
-            matches = self.__TODOIST_ATTACHMENT_REGEXP.findall(row["CONTENT"])
-            for matchstr in matches:
-                attachment_info = self.__fetch_attachment_info_from_json(matchstr)
-                if attachment_info:
-                    attachment_infos.append(attachment_info)
-
-        return attachment_infos
+        return TodoistAttachmentInfo(sanitize_file_name(data["file_name"]), data["file_url"])
 
     def __fetch_attachment_infos(self, vfs: VirtualFs) -> List[TodoistAttachmentInfo]:
-        """ Fetches the information of all the attachment_infos
-            of the current Todoist backup VFS """
-        self.__tracer.trace("Reading VFS...")
+        self.__tracer.trace("Reading sync data from VFS...")
 
-        attachment_infos = []
+        sync_raw = vfs.read_file(SYNC_DATA_FILENAME).decode("utf-8")
+        sync_data = json.loads(sync_raw)
 
-        # We iterate over the sorted file name list, so the resulting list
-        # is always in a consistent order independently of quirks in the VFS
-        for name in sorted(vfs.file_list()):
-            self.__tracer.trace(f"Parsing CSV file '{name}'...")
-            csv_string = vfs.read_file(name).decode('utf-8-sig')
-            attachment_infos.extend(self.__fetch_attachment_infos_from_csv(csv_string))
+        attachment_infos: List[TodoistAttachmentInfo] = []
 
+        # Attachments embedded in task content via [[ file {...} ]] syntax
+        for item in sync_data.get("items", []):
+            content = item.get("content", "")
+            for match_str in self.__TODOIST_ATTACHMENT_REGEXP.findall(content):
+                try:
+                    info = self.__attachment_from_dict(json.loads(match_str))
+                    if info:
+                        attachment_infos.append(info)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+        # Attachments on comments/notes via file_attachment field
+        for note in sync_data.get("notes", []):
+            fa = note.get("file_attachment")
+            if fa and isinstance(fa, dict):
+                info = self.__attachment_from_dict(fa)
+                if info:
+                    attachment_infos.append(info)
+
+        # Project-level comments also have file_attachment
+        for pnote in sync_data.get("project_notes", []):
+            fa = pnote.get("file_attachment")
+            if fa and isinstance(fa, dict):
+                info = self.__attachment_from_dict(fa)
+                if info:
+                    attachment_infos.append(info)
+
+        self.__tracer.trace(f"Found {len(attachment_infos)} attachments in sync data")
         return attachment_infos
 
     @staticmethod

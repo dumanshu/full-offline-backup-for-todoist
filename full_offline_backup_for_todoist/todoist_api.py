@@ -49,6 +49,18 @@ class TodoistApi:
         self.__tracer.trace("Parsing Todoist API projects JSON...")
         return [TodoistProjectInfo(row["name"], row["id"]) for row in project_list["projects"]]
 
+    def get_full_sync(self) -> dict:
+        """ Obtains a full data dump via the Sync API (works with data:read scope) """
+        self.__tracer.trace("Fetching full sync data using the Todoist API...")
+        sync_json = self.__urldownloader.post(
+            self.__SYNC_ENDPOINT, {
+                "sync_token": '*',
+                "resource_types": '["all"]',
+            })
+
+        self.__tracer.trace("Loading Todoist API full sync JSON...")
+        return json.loads(sync_json.decode())
+
     def export_project_as_csv(self, project: TodoistProjectInfo) -> bytes:
         """ Obtains the latest version of the specified project as a CSV file """
         self.__tracer.trace(f"Fetching project '{project.name}' (ID {project.identifier})"

@@ -6,3 +6,5 @@
 /htmlcov
 /*.zip
 __pycache__
+.DS_Store
+.todoist_token
