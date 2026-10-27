@@ -5,7 +5,7 @@ Usage:
     python3 oauth_setup.py <client_id> <client_secret>
 
 Opens browser for authorization, catches callback, exchanges for token,
-saves to .todoist_token with 0600 permissions.
+saves to ~/.todoist_token with 0600 permissions.
 """
 import http.server
 import json
@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 import webbrowser
 
-TOKEN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".todoist_token")
+TOKEN_FILE = os.path.expanduser("~/.todoist_token")
 REDIRECT_PORT = 8080
 REDIRECT_URI = f"http://localhost:{REDIRECT_PORT}/callback"
 
